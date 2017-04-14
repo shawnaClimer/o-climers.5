@@ -121,13 +121,13 @@ int main(int argc, char **argv){
 	}
 	puts(filename);
 	//number of slaves
-	int numSlaves=5; 
+	int numSlaves = 5; 
 	if(sflag){//change numSlaves
 		numSlaves = atoi(x);
 	}
 	
 	//time in seconds for master to terminate
-	int endTime=2;
+	int endTime = 2;
 	if(tflag){//change endTime
 		endTime = atoi(z);
 	}
@@ -227,7 +227,7 @@ int main(int argc, char **argv){
 	int sendnext = 1;//send next process message to run
 	int loglength = 0;//for log file
 	
-	int childclock = 0;//1 when child is given access to clock
+	//int childclock = 0;//1 when child is given access to clock
 	
 	//initialize random number generator
 	srand((unsigned) time(NULL));
@@ -238,19 +238,43 @@ int main(int argc, char **argv){
 	
 	//TODO initialize Resource Descriptors
 	
+	//put message type 1 (critical section token) into message queue
+	sbuf.mtype = 1;
+	//send message
+	if(msgsnd(msqid, &sbuf, 0, IPC_NOWAIT) < 0) {
+		printf("%d, %d, %d, %d\n", msqid, sbuf.mtype);
+		perror("msgsnd");
+		return 1;
+	}else{
+		printf("critical section token available\n");
+	}
+	
 	while(totalProcesses < 100 && clock[0] < 20 && (nowtime - starttime) < endTime){
 		//signal handler
 		signal(SIGINT, sighandler);
 		
-		//increment "system" clock
-		if (childclock == 0){//child isn't updating clock
+		//check for critical section token in message queue
+		if(msgrcv(msqid, &rbuf, MSGSZ, 1, 0) < 0){
+			//printf("message not received.\n");
+		}else{
+			//printf("critical section token received\n");
 			clock[1] += rand() % 1000;
 			if(clock[1] > 1000000000){
 				clock[0] += 1;
 				clock[1] -= 1000000000;
 			}
-		}
-				
+		
+			//put critical section token back into message queue	
+			sbuf.mtype = 1;
+			//send message
+			if(msgsnd(msqid, &sbuf, 0, IPC_NOWAIT) < 0) {
+				printf("%d, %d, %d, %d\n", msqid, sbuf.mtype);
+				perror("msgsnd");
+				return 1;
+			}else{
+				//printf("critical section token available\n");
+			}
+		}		
 		//fork children
 		currentns = clock[1];
 		//if time to fork new process && current number of processes < max number
@@ -272,17 +296,17 @@ int main(int argc, char **argv){
 				perror("Child failed to exec user");
 				return 1;
 			}
+			printf("forked a child\n");
 			totalProcesses++;//add to total processes	
 			currentnum++;//add to current number of processes
 		}
 		
-		//check for resource request messages
+		
+		//TODO check for resource request messages in resource descriptors
 		
 		//TODO allocate resources
 		
-		//check for child clock access messages
-		
-		//check for child termination messages
+		//TODO check for child termination messages
 		
 		//TODO run deadlock detection
 		

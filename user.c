@@ -21,9 +21,22 @@ static int *shared;
 //shared memory Resource Descriptors
 static resource *block;
 
+//for int[] of resources
+static int numrsc[20];
+
 void sighandler(int sigid){
 	printf("Caught signal %d\n", sigid);
-	
+	//if terminated naturally, all resources have been released
+	//if in deadlock terminated, need to release resources
+	//don't have to worry about race conditions, b/c no one is allowed to run right now
+	int i;
+	for (i = 0; i < 20; i++){
+		while (numrsc[i] > 0){
+			//block[i].num_avail++;//update resource descriptor
+			numrsc[i]--;
+			printf("releasing resources b/c deadlock termination\n");
+		}
+	}
 	//cleanup shared memory
 	detachshared();
 	
@@ -40,7 +53,7 @@ int detachshared(){//detach from shared memory clock and resources
 
 int main(int argc, char **argv){
 	
-	puts(argv[1]);
+	//puts(argv[1]);
 	//get bound sent as parameter
 	int bound = atoi(argv[1]);
 	
@@ -54,7 +67,7 @@ int main(int argc, char **argv){
 		return 1;
 	}
 	//get shared memory
-	if((rdmid = shmget(rdkey, (sizeof(resource) * MAXQUEUE), IPC_CREAT | 0666)) == -1){
+	if((rdmid = shmget(rdkey, (sizeof(resource) * 20), IPC_CREAT | 0666)) == -1){
 		perror("failed to create resource descriptors shared memory");
 		return 1;
 	}
@@ -90,16 +103,7 @@ int main(int argc, char **argv){
 	}
 	clock = shared;
 	
-	/* int startSec, startNs;//start "time" for process
-	startSec = clock[0];
-	startNs = clock[1];
-	int runTime = rand() % 100000;
-	int endSec = startSec;
-	int endNs = startNs + runTime;
-	if(endNs > 1000000000){
-		endSec++;
-		endNs -= 1000000000;
-	} */
+	
 	
 	//attach to message queue in shared memory
 	int msqid;
@@ -131,8 +135,10 @@ int main(int argc, char **argv){
 	int prevns = startns;//ns when process starts
 	int currentns;//current ns
 	
-	int numrsc[20];//keep track of number of each resource allocated to me
-	for (int i = 0; i < 20; i++){
+	//int numrsc[20];//keep track of number of each resource allocated to me
+	
+	int i;
+	for (i = 0; i < 20; i++){
 		numrsc[i] = 0;
 	}
 	int haversc = 0;//num of resources
@@ -141,12 +147,11 @@ int main(int argc, char **argv){
 		//signal handler
 		signal(SIGINT, sighandler);
 		
-		//TODO request critical section
-		//look for message type PID critical section "token"
-		if(msgrcv(msqid, &rbuf, MSGSZ, mypid, 0) < 0){
+		//look for message type 1 critical section "token"
+		if(msgrcv(msqid, &rbuf, MSGSZ, 1, 0) < 0){
 			//printf("message not received.\n");
 		}else{
-			printf("critical section token received.\n");
+			//printf("critical section token received.\n");
 			//time to request/release resource?
 			currentsec = clock[0];
 			currentns = clock[1];
@@ -155,25 +160,35 @@ int main(int argc, char **argv){
 				startns = currentns;//set for next time
 				int index = rand() % 20;//randomly choose which resource to request/release
 				if (rand() % 10 < 8){//80% chance request
-					//TODO request resource
+					//request resource
+					printf("requesting resource.\n");
+					/* for (int i = 0; i < MAX; i++){//loop through pids request in resource descriptor
+						if (blockptr[index].request_pids[i] == 0){
+							blockptr[index].request_pids[i] = mypid;
+							break;
+						}
+					} */
+					//TODO release critical section token?
+					//TODO wait for request to be granted by message rcv of type mypid
+					//if (msgrcv(msqid, &rbuf, MSGSZ, mypid, 0) < 0){
+						
+					//}else {
+						printf("request granted\n");
+						haversc++;
+						numrsc[index]++;
+					//}
 					
-					haversc++;
 				}else{
+					printf("releasing resource.\n");
 					//release a resource
-					if (haversc > 0){//have at least one resource
-						int release = 0;
-						while (release == 0){//release = 1 when one is released
-							if (numrsc[index] != 0){
-								numrsc[index]--;
-								release = 1;
-								//access rd and increase num available
-								blockptr[index].num_avail++;
-								//decrease number in num resources 
-								numrsc[index]--;
-								haversc--;//decrease total num of resources allocated
-							}//end update quanities of resource
-						}//end trying to release
-					}//end if have resource
+					if (numrsc[index] != 0){
+						//access rd and increase num available
+						//blockptr[index].num_avail++;
+						//decrease number in num resources 
+						numrsc[index]--;
+						haversc--;//decrease total num of resources allocated
+					}
+					
 				}//end release resource
 			}//end time to check for request/release resource
 			
@@ -187,92 +202,46 @@ int main(int argc, char **argv){
 			//check if should terminate
 			currentns = clock[1];
 			if ((currentns - prevns) >= timetocheck){
-				if (rand() % 10 < 2){//20% chance for termination
+				if (rand() % 10 < 1){//10% chance for termination
+				printf("time to terminate\n");
 					terminate = 1;
 				}
 				timetocheck = rand() % 250001;//set next time to check
 			}
 			//release all resources so can terminate
 			if (terminate == 1){
-				for (int i = 0; i < 20; i++){
+				//TODO send message that i'm terminating
+				printf("releasing resources naturally\n");
+				for (i = 0; i < 20; i++){
 					while (numrsc[i] > 0){
-						blockptr[i].num_avail++;
+						//blockptr[i].num_avail++;//update resource descriptor
 						numrsc[i]--;
 					}
 				}
+				
 			}
 			//release critical section
 			//message type 1
 			sbuf.mtype = 1;
-			sbuf.mtext[0] = mypid;
-			
 			//send message
-			if(msgsnd(msqid, &sbuf, MSGSZ, IPC_NOWAIT) < 0){
+			if(msgsnd(msqid, &sbuf, 0, IPC_NOWAIT) < 0){
 			//if(msgsnd(msqid, &sbuf, buf_length, IPC_NOWAIT) < 0) {
 				printf("%d, %d\n", msqid, sbuf.mtype);//, sbuf.mtext[0], buf_length);
 				perror("msgsnd from user");
 				return 1;
 			}else{
-				printf("critical section token sent.\n");
+				//printf("critical section token sent from user.\n");
 			}
 		}//end critical section
 		
-		
-		
-			//old code
-			//find my pcb
-			int foundpcb = 0;
-			int i;
-			for(i = 0; i < MAXQUEUE; i++){
-				if(blockptr[i].pid == mypid){
-					foundpcb = 1;
-					break;
-				}
-			}
-			//update pcb
-			if(foundpcb == 1){
-				printf("found my pcb\n");
-				//check timesys > timeran
-				if(blockptr[i].timesys > (blockptr[i].totalcpu + timeran)){
-					printf("need more time, requesting requeue\n");
-					//more = 1;//needs more time
-					blockptr[i].totalcpu += timeran;
-					blockptr[i].timeburst = timeran;
-				}else{
-					printf("completed my process. terminating.\n");
-					timeran = (blockptr[i].timesys - blockptr[i].totalcpu);
-					//leftover = ((blockptr[i].totalcpu + timeran) - blockptr[i].timesys);
-					//timeran = (timeran - leftover);
-					//timeran = ((blockptr[i].totalcpu + timeran) - blockptr[i].timesys);
-					blockptr[i].totalcpu += timeran;
-					blockptr[i].timeburst = timeran;
-					timeisup = 1;//done
-					//timeran = leftover;
-				}
-				
-			}//end found and updated pcb
-			
-			//blockptr[i].timesys = runTime;
-			//check time 
-			clock = shared;
-			
-			
-			
-		}//end received message token
-		
 	}//end of while loop
 	
-	//TODO send message that process is terminating
 			
 	//code for freeing shared memory
 	if(detachshared() == -1){
 		return 1;
 	}
-	/* if(shmdt(shared) == -1){
-		perror("failed to detach from shared memory");
-		return 1;
-	} */
-	
+		
 	
 	return 0;
 }
