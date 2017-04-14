@@ -34,7 +34,7 @@ void sighandler(int sigid){
 		while (numrsc[i] > 0){
 			//block[i].num_avail++;//update resource descriptor
 			numrsc[i]--;
-			printf("releasing resources b/c deadlock termination\n");
+			//printf("releasing resources b/c deadlock termination\n");
 		}
 	}
 	//cleanup shared memory
@@ -161,7 +161,7 @@ int main(int argc, char **argv){
 				int index = rand() % 20;//randomly choose which resource to request/release
 				if (rand() % 10 < 8){//80% chance request
 					//request resource
-					printf("requesting resource.\n");
+					//printf("requesting resource.\n");
 					/* for (int i = 0; i < MAX; i++){//loop through pids request in resource descriptor
 						if (blockptr[index].request_pids[i] == 0){
 							blockptr[index].request_pids[i] = mypid;
@@ -173,13 +173,13 @@ int main(int argc, char **argv){
 					//if (msgrcv(msqid, &rbuf, MSGSZ, mypid, 0) < 0){
 						
 					//}else {
-						printf("request granted\n");
+						//printf("request granted\n");
 						haversc++;
 						numrsc[index]++;
 					//}
 					
 				}else{
-					printf("releasing resource.\n");
+					//printf("releasing resource.\n");
 					//release a resource
 					if (numrsc[index] != 0){
 						//access rd and increase num available
@@ -203,7 +203,7 @@ int main(int argc, char **argv){
 			currentns = clock[1];
 			if ((currentns - prevns) >= timetocheck){
 				if (rand() % 10 < 1){//10% chance for termination
-				printf("time to terminate\n");
+				//printf("time to terminate\n");
 					terminate = 1;
 				}
 				timetocheck = rand() % 250001;//set next time to check
@@ -211,7 +211,7 @@ int main(int argc, char **argv){
 			//release all resources so can terminate
 			if (terminate == 1){
 				//TODO send message that i'm terminating
-				printf("releasing resources naturally\n");
+				//printf("releasing resources naturally\n");
 				for (i = 0; i < 20; i++){
 					while (numrsc[i] > 0){
 						//blockptr[i].num_avail++;//update resource descriptor

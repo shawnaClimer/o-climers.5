@@ -233,10 +233,22 @@ int main(int argc, char **argv){
 	srand((unsigned) time(NULL));
 	
 	//interval between forking children
-	int timetofork = rand() % 10000;
+	int timetofork = rand() % 500000;
 	int currentns, prevns = 0;
 	
 	//TODO initialize Resource Descriptors
+	
+	for (i = 0; i < 20; i++){
+		if (rand() % 100 < 19){//20% chance
+			blockptr[i].share = 1;
+			blockptr[i].num_avail = 0;
+		}else{
+			blockptr[i].share = 0;
+			blockptr[i].total_num = (rand() % 10) + 1;
+			blockptr[i].num_avail = blockptr[i].total_num;
+		}
+		//printf("resource %d has share = %d and num_avail = %d\n", i, blockptr[i].share, blockptr[i].num_avail);
+	}
 	
 	//put message type 1 (critical section token) into message queue
 	sbuf.mtype = 1;
@@ -246,7 +258,7 @@ int main(int argc, char **argv){
 		perror("msgsnd");
 		return 1;
 	}else{
-		printf("critical section token available\n");
+		//printf("critical section token available\n");
 	}
 	
 	while(totalProcesses < 100 && clock[0] < 20 && (nowtime - starttime) < endTime){
@@ -296,7 +308,7 @@ int main(int argc, char **argv){
 				perror("Child failed to exec user");
 				return 1;
 			}
-			printf("forked a child\n");
+			//printf("forked a child\n");
 			totalProcesses++;//add to total processes	
 			currentnum++;//add to current number of processes
 		}
