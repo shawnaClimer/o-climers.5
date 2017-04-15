@@ -32,7 +32,7 @@ void sighandler(int sigid){
 	int i;
 	for (i = 0; i < 20; i++){
 		while (numrsc[i] > 0){
-			//block[i].num_avail++;//update resource descriptor
+			block[i].num_avail++;//update resource descriptor
 			numrsc[i]--;
 			//printf("releasing resources b/c deadlock termination\n");
 		}
@@ -76,7 +76,9 @@ int main(int argc, char **argv){
 		perror("failed to attach to resource descriptors memory");
 		return 1;
 	}
+		
 	blockptr = block;	
+	
 	//attach to clock shared memory
 	key_t key;
 	int shmid;
@@ -101,6 +103,7 @@ int main(int argc, char **argv){
 		}
 		return 1;
 	}
+		
 	clock = shared;
 	
 	
@@ -122,7 +125,7 @@ int main(int argc, char **argv){
 	int mypid = getpid();
 	
 	//initialize random number generator
-	srand((unsigned) time(NULL));
+	srand( time(NULL) );
 	
 	//time to request/release resource
 	int checkrsc = rand() % bound;
@@ -148,50 +151,10 @@ int main(int argc, char **argv){
 		signal(SIGINT, sighandler);
 		
 		//look for message type 1 critical section "token"
-		if(msgrcv(msqid, &rbuf, MSGSZ, 1, 0) < 0){
+		if(msgrcv(msqid, &rbuf, 0, 1, 0) < 0){
 			//printf("message not received.\n");
 		}else{
 			//printf("critical section token received.\n");
-			//time to request/release resource?
-			currentsec = clock[0];
-			currentns = clock[1];
-			if (((currentsec * 1000000000) + currentns) >= (((startsec * 1000000000) + startns) + checkrsc)){
-				startsec = currentsec;//set for next time
-				startns = currentns;//set for next time
-				int index = rand() % 20;//randomly choose which resource to request/release
-				if (rand() % 10 < 8){//80% chance request
-					//request resource
-					//printf("requesting resource.\n");
-					/* for (int i = 0; i < MAX; i++){//loop through pids request in resource descriptor
-						if (blockptr[index].request_pids[i] == 0){
-							blockptr[index].request_pids[i] = mypid;
-							break;
-						}
-					} */
-					//TODO release critical section token?
-					//TODO wait for request to be granted by message rcv of type mypid
-					//if (msgrcv(msqid, &rbuf, MSGSZ, mypid, 0) < 0){
-						
-					//}else {
-						//printf("request granted\n");
-						haversc++;
-						numrsc[index]++;
-					//}
-					
-				}else{
-					//printf("releasing resource.\n");
-					//release a resource
-					if (numrsc[index] != 0){
-						//access rd and increase num available
-						//blockptr[index].num_avail++;
-						//decrease number in num resources 
-						numrsc[index]--;
-						haversc--;//decrease total num of resources allocated
-					}
-					
-				}//end release resource
-			}//end time to check for request/release resource
-			
 			//update clock
 			clock[1] += rand() % 1000;
 			if(clock[1] > 1000000000){
@@ -202,7 +165,7 @@ int main(int argc, char **argv){
 			//check if should terminate
 			currentns = clock[1];
 			if ((currentns - prevns) >= timetocheck){
-				if (rand() % 10 < 1){//10% chance for termination
+				if (rand() % 100 < 10){//10% chance for termination
 				//printf("time to terminate\n");
 					terminate = 1;
 				}
@@ -210,29 +173,111 @@ int main(int argc, char **argv){
 			}
 			//release all resources so can terminate
 			if (terminate == 1){
-				//TODO send message that i'm terminating
+				//send message that i'm terminating
+				sbuf.mtype = 2;//message type 2 
+				sbuf.mtext[0] = clock[0];
+				sbuf.mtext[1] = clock[1];
+				buf_length = sizeof(sbuf.mtext);
+				if(msgsnd(msqid, &sbuf, buf_length, IPC_NOWAIT) < 0){
+					printf("%d, %d\n", msqid, sbuf.mtype);
+					perror("time msgsend");
+					detachshared();
+				}else{
+					printf("user terminating message sent. %d, %d\n", sbuf.mtext[0], sbuf.mtext[1]);
+				}
 				//printf("releasing resources naturally\n");
 				for (i = 0; i < 20; i++){
 					while (numrsc[i] > 0){
-						//blockptr[i].num_avail++;//update resource descriptor
+						blockptr[i].num_avail++;//update resource descriptor
 						numrsc[i]--;
 					}
 				}
 				
 			}
-			//release critical section
-			//message type 1
-			sbuf.mtype = 1;
-			//send message
-			if(msgsnd(msqid, &sbuf, 0, IPC_NOWAIT) < 0){
-			//if(msgsnd(msqid, &sbuf, buf_length, IPC_NOWAIT) < 0) {
-				printf("%d, %d\n", msqid, sbuf.mtype);//, sbuf.mtext[0], buf_length);
-				perror("msgsnd from user");
-				return 1;
-			}else{
-				//printf("critical section token sent from user.\n");
-			}
-		}//end critical section
+			//time to request/release resource?
+			currentsec = clock[0];
+			currentns = clock[1];
+			if (((currentsec * 1000000000) + currentns) >= (((startsec * 1000000000) + startns) + checkrsc)){
+				startsec = currentsec;//set for next time
+				startns = currentns;//set for next time
+				int index = rand() % 20;//randomly choose which resource to request/release
+				if (rand() % 100 < 80){//80% chance request
+					//request resource
+					//printf("requesting resource.\n");
+					for (i = 0; i < MAX; i++){//loop through pids request in resource descriptor
+						if (blockptr[index].request_pids[i] == 0){
+							blockptr[index].request_pids[i] = mypid;
+							//printf("put pid in request q for resource %d\n", index);
+							break;
+						}
+					} 
+					//release critical section
+					//message type 1
+					sbuf.mtype = 1;
+					//send message
+					if(msgsnd(msqid, &sbuf, 0, IPC_NOWAIT) < 0){
+					//if(msgsnd(msqid, &sbuf, buf_length, IPC_NOWAIT) < 0) {
+						printf("%d, %d\n", msqid, sbuf.mtype);//, sbuf.mtext[0], buf_length);
+						perror("msgsnd from user");
+						detachshared();
+					}else{
+						//printf("critical section token sent from user.\n");
+					}
+					
+					//wait for request to be granted by message rcv of type mypid
+					if (msgrcv(msqid, &rbuf, 0, mypid, 0) < 0){
+						
+					}else {
+						//printf("user received request granted message\n");
+						haversc++;
+						numrsc[index]++;
+					}
+					
+								
+				}else{
+					//printf("releasing resource.\n");
+					//release a resource
+					if (numrsc[index] != 0){
+						//access rd and increase num available
+						blockptr[index].num_avail++;
+						printf("resource %d now has %d available\n", index, blockptr[index].num_avail);
+						//decrease number in num resources 
+						numrsc[index]--;
+						haversc--;//decrease total num of resources allocated
+					}
+					//release critical section
+					//message type 1
+					sbuf.mtype = 1;
+					//send message
+					if(msgsnd(msqid, &sbuf, 0, IPC_NOWAIT) < 0){
+					//if(msgsnd(msqid, &sbuf, buf_length, IPC_NOWAIT) < 0) {
+						printf("%d, %d\n", msqid, sbuf.mtype);//, sbuf.mtext[0], buf_length);
+						perror("msgsnd from user");
+						detachshared();
+					}else{
+						//printf("critical section token sent from user.\n");
+					}
+					
+				}//end release resource
+			}//end time to check for request/release resource
+			else{
+				//release critical section
+					//message type 1
+					sbuf.mtype = 1;
+					//send message
+					if(msgsnd(msqid, &sbuf, 0, IPC_NOWAIT) < 0){
+					//if(msgsnd(msqid, &sbuf, buf_length, IPC_NOWAIT) < 0) {
+						printf("%d, %d\n", msqid, sbuf.mtype);//, sbuf.mtext[0], buf_length);
+						perror("msgsnd from user");
+						detachshared();
+					}else{
+						//printf("critical section token sent from user.\n");
+					}
+			}//release critical section token if not request/release resource time
+			
+			
+			
+		}
 		
 	}//end of while loop
 	

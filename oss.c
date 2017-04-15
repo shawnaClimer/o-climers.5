@@ -42,10 +42,15 @@ void sighandler(int sigid){
 	}
 	
 	//cleanup shared memory
+	cleanup();
+	
+	exit(sigid);
+}
+int cleanup(){
 	detachshared();
 	removeshared();
 	deletequeue();
-	exit(sigid);
+	return 0;
 }
 
 int deletequeue(){
@@ -164,6 +169,9 @@ int main(int argc, char **argv){
 		perror("failed to attach to resource descriptors memory");
 		return 1;
 	}
+	//delete after detach
+	//shmctl(rdmid, IPC_RMID, 0);
+	
 	blockptr = block;
 	
 	//create clock in shared memory
@@ -190,6 +198,9 @@ int main(int argc, char **argv){
 		}
 		return 1;
 	}
+	//delete after detach
+	//shmctl(shmid, IPC_RMID, 0);
+
 	clock = shared;
 	clock[0] = 0;//initialize "clock" to zero
 	clock[1] = 0;
@@ -230,16 +241,15 @@ int main(int argc, char **argv){
 	//int childclock = 0;//1 when child is given access to clock
 	
 	//initialize random number generator
-	srand((unsigned) time(NULL));
+	srand( time(NULL) );
 	
 	//interval between forking children
 	int timetofork = rand() % 500000;
 	int currentns, prevns = 0;
 	
-	//TODO initialize Resource Descriptors
-	
+	//initialize Resource Descriptors
 	for (i = 0; i < 20; i++){
-		if (rand() % 100 < 19){//20% chance
+		if (rand() % 100 > 78){//20% chance
 			blockptr[i].share = 1;
 			blockptr[i].num_avail = 0;
 		}else{
@@ -247,18 +257,22 @@ int main(int argc, char **argv){
 			blockptr[i].total_num = (rand() % 10) + 1;
 			blockptr[i].num_avail = blockptr[i].total_num;
 		}
-		//printf("resource %d has share = %d and num_avail = %d\n", i, blockptr[i].share, blockptr[i].num_avail);
+		int j;
+		for (j = 0; j < MAX; j++){
+			blockptr[i].request_pids[j] = 0;//initialize request array
+		}
+		printf("resource %d has share = %d and num_avail = %d\n", i, blockptr[i].share, blockptr[i].num_avail);
 	}
 	
 	//put message type 1 (critical section token) into message queue
 	sbuf.mtype = 1;
 	//send message
 	if(msgsnd(msqid, &sbuf, 0, IPC_NOWAIT) < 0) {
-		printf("%d, %d, %d, %d\n", msqid, sbuf.mtype);
+		printf("%d, %d\n", msqid, sbuf.mtype);
 		perror("msgsnd");
-		return 1;
+		cleanup();
 	}else{
-		//printf("critical section token available\n");
+		printf("critical section token available\n");
 	}
 	
 	while(totalProcesses < 100 && clock[0] < 20 && (nowtime - starttime) < endTime){
@@ -266,7 +280,7 @@ int main(int argc, char **argv){
 		signal(SIGINT, sighandler);
 		
 		//check for critical section token in message queue
-		if(msgrcv(msqid, &rbuf, MSGSZ, 1, 0) < 0){
+		if(msgrcv(msqid, &rbuf, 0, 1, 0) < 0){
 			//printf("message not received.\n");
 		}else{
 			//printf("critical section token received\n");
@@ -281,8 +295,8 @@ int main(int argc, char **argv){
 			//send message
 			if(msgsnd(msqid, &sbuf, 0, IPC_NOWAIT) < 0) {
 				printf("%d, %d, %d, %d\n", msqid, sbuf.mtype);
-				perror("msgsnd");
-				return 1;
+				perror("msgsnd critical section token");
+				cleanup();
 			}else{
 				//printf("critical section token available\n");
 			}
@@ -301,12 +315,12 @@ int main(int argc, char **argv){
 			pids[i] = fork();
 			if(pids[i] == -1){
 				perror("Failed to fork");
-				return 1;
+				cleanup();
 			}
 			if(pids[i] == 0){
 				execl("user", "user", "10000", NULL);
 				perror("Child failed to exec user");
-				return 1;
+				cleanup();
 			}
 			//printf("forked a child\n");
 			totalProcesses++;//add to total processes	
@@ -314,12 +328,46 @@ int main(int argc, char **argv){
 		}
 		
 		
-		//TODO check for resource request messages in resource descriptors
+		//check for resource requests in resource descriptors
+		for (i = 0; i < 20; i++){
+			int j;
+			for (j = 0; j < MAX; j++){
+				if ((blockptr[i].num_avail > 0) || (blockptr[i].share == 1)){
+					//allocate resource
+					if (blockptr[i].request_pids[j] != 0){
+						//send request granted message to pid
+						sbuf.mtype = blockptr[i].request_pids[j];
+						if(msgsnd(msqid, &sbuf, 0, IPC_NOWAIT) < 0){
+							perror("resource granted message send error");
+							cleanup();
+						}else{
+							blockptr[i].num_avail--;
+							blockptr[i].request_pids[j] = 0;
+							//printf("resource granted message sent\n");
+						}
+					}
+				}
+			}
+		}
 		
-		//TODO allocate resources
+	
 		
-		//TODO check for child termination messages
-		
+		//check for child termination messages
+		errno = 0;
+		if(msgrcv(msqid, &rbuf, sizeof(int [MSGSZ]), 2, MSG_NOERROR | IPC_NOWAIT) < 0){
+			if(errno != ENOMSG){
+				perror("msgrcv in oss");
+				cleanup();
+			}
+				//printf("message time up from user not received.\n");
+		}else{
+			childsec = rbuf.mtext[0];
+			childns = rbuf.mtext[1];
+			printf("time up message from user received.\n");
+			//TODO write to log
+			//TODO update pids[], current num processes
+				
+		}
 		//TODO run deadlock detection
 		
 		//get current time
@@ -334,7 +382,7 @@ int main(int argc, char **argv){
 	} 
 	
 	//code for freeing shared memory
-	if(detachshared() == -1){
+	/* if(detachshared() == -1){
 		return 1;
 	}
 	if(removeshared() == -1){
@@ -344,7 +392,7 @@ int main(int argc, char **argv){
 	//delete message queue
 	if(deletequeue() == -1){
 		return 1;
-	}
-	
+	} */
+	cleanup();
 	return 0;
 }
