@@ -224,7 +224,7 @@ int main(int argc, char **argv){
 	pid_t pids[numSlaves];//pid_t *pidptr points to this
 	pidptr = pids;
 	//initialize pids[]
-	printf("initializing pids[]\n");
+	//printf("initializing pids[]\n");
 	int i;
 	for(i = 0; i < numSlaves; i++){
 		pids[i] = 1;
@@ -262,7 +262,7 @@ int main(int argc, char **argv){
 			blockptr[i].request_pids[j] = 0;//initialize request array
 			blockptr[i].current_pids[j] = 0;//initialize number resource each pid has
 		}
-		printf("resource %d has share = %d and num_avail = %d\n", i, blockptr[i].share, blockptr[i].num_avail);
+		//printf("resource %d has share = %d and num_avail = %d\n", i, blockptr[i].share, blockptr[i].num_avail);
 	}
 	
 	//put message type 1 (critical section token) into message queue
@@ -273,22 +273,23 @@ int main(int argc, char **argv){
 		perror("msgsnd");
 		cleanup();
 	}else{
-		printf("critical section token available\n");
+		//printf("critical section token available\n");
 	}
 	
 	//time interval for deadlock detection
 	//long deadlock_check = 5000000000;
-	int deadlock_check = 5;//5 seconds
+	int deadlock_check = 4;//4 seconds
 	int last_checksec = 0;
 	int last_checkns = 0;
 	int currentsec;//current sec on clock
 	
 	//statistics
-	int requests_granted = 0;
+	int requests_granted = 0;//total requests granted
 	int num_natural = 0;//terminated naturally
 	int num_deadlock = 0;//terminated by deadlock
 	int num_check = 0;//num times deadlock ran
 	int each_deadlock = 0;//num terminated in each deadlock
+	double per_killed[5];//percent killed in deadlock
 	
 	while(totalProcesses < 100 && clock[0] < 20 && (nowtime - starttime) < endTime){
 		//signal handler
@@ -403,9 +404,10 @@ int main(int argc, char **argv){
 			//if ((((currentsec * 1000000000) + currentns) - ((last_checksec * 1000000000) + last_checkns)) >= deadlock_check){
 				last_checksec = currentsec;
 				last_checkns = currentns;
+				num_check++;//total times checking for deadlock
 				int deadlock = 0;//no deadlock
 				//int catch = 0;//jsut to make sure not an ifinite loop
-				printf("checking for deadlock at %d : %d\n", currentsec, currentns);
+				//printf("checking for deadlock at %d : %d\n", currentsec, currentns);
 				do {
 					int x;
 					for (i = 0; i < 20; i++){
@@ -416,13 +418,13 @@ int main(int argc, char **argv){
 								//pid in requests, none available
 								if (blockptr[i].request_pids[j] != 0){
 									deadlock = 1;
-									printf("found deadlock\n");
+									//printf("found deadlock\n");
 									//find pid and remove resources and delete process
 									pid = blockptr[i].request_pids[j];
 									blockptr[i].request_pids[j] = 0;//remove from request_pids
 									for (x = 0; x < numSlaves; x++){
 										if (pids[x] == pid){
-											printf("found pid %d involved in deadlock. is pids[%d]\n", pid, x);
+											//printf("found pid %d involved in deadlock. is pids[%d]\n", pid, x);
 											break;
 										}
 									}
@@ -443,8 +445,10 @@ int main(int argc, char **argv){
 						}
 						kill(pid, SIGQUIT);
 						pids[x] = 1;//remove from pids
+						currentnum--;//decrease current num processes
 						deadlock = 0;//hopeful
-						
+						num_deadlock++;//total terminated by deadlock
+						each_deadlock++;//total in this deadlock
 					}
 					
 					//test if still deadlock
@@ -462,7 +466,10 @@ int main(int argc, char **argv){
 					}
 					//catch++;
 				}while (deadlock == 1);// && catch < 10);
-			
+				double temp = (each_deadlock / ((double)(currentnum + each_deadlock)));
+				per_killed[(num_check - 1)] = temp;
+				//printf("%d killed this deadlock out of %d current num = %.2f percent\n", each_deadlock, currentnum + each_deadlock, temp);
+				each_deadlock = 0;
 			}
 			//put critical section token back into message queue	
 			sbuf.mtype = 1;
@@ -486,16 +493,17 @@ int main(int argc, char **argv){
 			}
 				//printf("message time up from user not received.\n");
 		}else{
+			num_natural++;
 			childsec = rbuf.mtext[0];
 			childns = rbuf.mtext[1];
-			printf("time up message from user received.\n");
+			//printf("time up message from user received.\n");
 			//TODO write to log
 			//update pids[], current num processes
 			pid = wait(&status);//make sure child terminated
 			//find pid in pids[]
 			for(i = 0; i < numSlaves; i++){
 				if(pids[i] == pid){
-					printf("found pid that terminated.\n");
+					//printf("found pid that terminated.\n");
 					pids[i] = 1;
 					currentnum--;
 				}
@@ -513,7 +521,16 @@ int main(int argc, char **argv){
 		currentnum--;
 		kill(pids[currentnum], SIGQUIT);
 	} 
-	printf("%d total processes ran\n", totalProcesses);
+	printf("%d total processes started\n", totalProcesses);
+	printf("%d total processes terminated naturally\n", num_natural);
+	printf("%d total processes terminated by deadlock\n", num_deadlock);
+	printf("%d total times deadlock detection ran\n", num_check);
+	double temp = 0;
+	for (i = 0; i < num_check; i++){
+		temp += per_killed[i];
+	}
+	temp = (temp / num_check);
+	printf("%.2f percent average killed in deadlock\n", temp * 100);
 	printf("%d total requests granted\n", requests_granted);
 	//code for freeing shared memory
 	/* if(detachshared() == -1){

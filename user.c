@@ -147,7 +147,7 @@ int main(int argc, char **argv){
 		}else{
 			//printf("critical section token received.\n");
 			//update clock
-			clock[1] += rand() % 100000;
+			clock[1] += rand() % 1000000;
 			if(clock[1] > 1000000000){
 				clock[0] += 1;
 				clock[1] -= 1000000000;
@@ -156,7 +156,7 @@ int main(int argc, char **argv){
 			//check if should terminate
 			currentns = clock[1];
 			if ((currentns - prevns) >= timetocheck){
-				if (rand() % 100 < 10){//10% chance for termination
+				if (rand() % 100 < 5){//5% chance for termination
 				//printf("time to terminate\n");
 					terminate = 1;
 				}
@@ -175,7 +175,7 @@ int main(int argc, char **argv){
 					perror("time msgsend");
 					detachshared();
 				}else{
-					printf("user terminating message sent. %d, %d\n", sbuf.mtext[0], sbuf.mtext[1]);
+					//printf("user terminating message sent. %d, %d\n", sbuf.mtext[0], sbuf.mtext[1]);
 				}
 				//printf("releasing resources naturally\n");
 				for (i = 0; i < 20; i++){
@@ -246,7 +246,7 @@ int main(int argc, char **argv){
 							//access rd and increase num available
 							blockptr[index].num_avail++;
 							blockptr[index].current_pids[mynum]--;
-							printf("resource %d now has %d available\n", index, blockptr[index].num_avail);
+							//printf("resource %d now has %d available\n", index, blockptr[index].num_avail);
 							//decrease number in num resources 
 							numrsc[index]--;
 							haversc--;//decrease total num of resources allocated
