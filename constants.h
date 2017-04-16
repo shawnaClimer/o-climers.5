@@ -1,7 +1,7 @@
 //max num processes
 #define MAX		18
 //for message queue
-#define MSGSZ	2
+#define MSGSZ	3
 typedef struct msgbuf {
 	long mtype;
 	int mtext[MSGSZ];

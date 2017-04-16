@@ -126,7 +126,7 @@ int main(int argc, char **argv){
 	}
 	puts(filename);
 	//number of slaves
-	int numSlaves = 5; 
+	int numSlaves = 10; 
 	if(sflag){//change numSlaves
 		numSlaves = atoi(x);
 	}
@@ -244,8 +244,8 @@ int main(int argc, char **argv){
 	srand( time(NULL) );
 	
 	//interval between forking children
-	int timetofork = rand() % 500000;
-	int currentns, prevns = 0;
+	int timetofork = rand() % 500000000;//500 milliseconds
+	int currentns, prevns, prevsec = 0;
 	
 	//initialize Resource Descriptors
 	for (i = 0; i < 20; i++){
@@ -260,6 +260,7 @@ int main(int argc, char **argv){
 		int j;
 		for (j = 0; j < MAX; j++){
 			blockptr[i].request_pids[j] = 0;//initialize request array
+			blockptr[i].current_pids[j] = 0;//initialize number resource each pid has
 		}
 		printf("resource %d has share = %d and num_avail = %d\n", i, blockptr[i].share, blockptr[i].num_avail);
 	}
@@ -275,16 +276,35 @@ int main(int argc, char **argv){
 		printf("critical section token available\n");
 	}
 	
+	//time interval for deadlock detection
+	//long deadlock_check = 5000000000;
+	int deadlock_check = 5;//5 seconds
+	int last_checksec = 0;
+	int last_checkns = 0;
+	int currentsec;//current sec on clock
+	
+	//statistics
+	int requests_granted = 0;
+	int num_natural = 0;//terminated naturally
+	int num_deadlock = 0;//terminated by deadlock
+	int num_check = 0;//num times deadlock ran
+	int each_deadlock = 0;//num terminated in each deadlock
+	
 	while(totalProcesses < 100 && clock[0] < 20 && (nowtime - starttime) < endTime){
 		//signal handler
 		signal(SIGINT, sighandler);
 		
+		errno = 0;
 		//check for critical section token in message queue
-		if(msgrcv(msqid, &rbuf, 0, 1, 0) < 0){
-			//printf("message not received.\n");
+		if(msgrcv(msqid, &rbuf, 0, 1, MSG_NOERROR | IPC_NOWAIT) < 0){
+			if(errno != ENOMSG){
+				perror("msgrcv in oss");
+				cleanup();
+			}
+			
 		}else{
 			//printf("critical section token received\n");
-			clock[1] += rand() % 1000;
+			clock[1] += rand() % 1000000;
 			if(clock[1] > 1000000000){
 				clock[0] += 1;
 				clock[1] -= 1000000000;
@@ -302,10 +322,12 @@ int main(int argc, char **argv){
 			}
 		}		
 		//fork children
+		currentsec = clock[0];
 		currentns = clock[1];
 		//if time to fork new process && current number of processes < max number
-		if(((currentns - prevns) >= timetofork) && (currentnum < numSlaves)){
+		if(((((currentsec * 1000000000) + currentns) - ((prevsec * 1000000000) + prevns)) >= timetofork) && (currentnum < numSlaves)){
 			prevns = currentns;
+			prevsec = currentsec;
 			//find empty pids[]
 			for(i = 0; i < numSlaves; i++){
 				if(pids[i] == 1){
@@ -317,39 +339,142 @@ int main(int argc, char **argv){
 				perror("Failed to fork");
 				cleanup();
 			}
+			
+			//convert i to a string to send as parameter
+			int length = snprintf(NULL, 0, "%d", i);
+			char* pidnum = malloc(length + 1);
+			snprintf(pidnum, (length + 1), "%d", i);
+			
 			if(pids[i] == 0){
-				execl("user", "user", "10000", NULL);
+				execl("user", "user", "10000", pidnum, NULL);
 				perror("Child failed to exec user");
 				cleanup();
 			}
+			
+			free(pidnum);
 			//printf("forked a child\n");
 			totalProcesses++;//add to total processes	
 			currentnum++;//add to current number of processes
 		}
-		
-		
-		//check for resource requests in resource descriptors
-		for (i = 0; i < 20; i++){
-			int j;
-			for (j = 0; j < MAX; j++){
-				if ((blockptr[i].num_avail > 0) || (blockptr[i].share == 1)){
-					//allocate resource
-					if (blockptr[i].request_pids[j] != 0){
-						//send request granted message to pid
-						sbuf.mtype = blockptr[i].request_pids[j];
-						if(msgsnd(msqid, &sbuf, 0, IPC_NOWAIT) < 0){
-							perror("resource granted message send error");
-							cleanup();
-						}else{
-							blockptr[i].num_avail--;
-							blockptr[i].request_pids[j] = 0;
-							//printf("resource granted message sent\n");
+		errno = 0;
+		//check for critical section token in message queue
+		if(msgrcv(msqid, &rbuf, 0, 1, MSG_NOERROR | IPC_NOWAIT) < 0){
+			if(errno != ENOMSG){
+				perror("msgrcv in oss");
+				cleanup();
+			}
+			//printf("message not received.\n");
+		}else{
+			//check for resource requests in resource descriptors
+			for (i = 0; i < 20; i++){
+				int j;
+				for (j = 0; j < MAX; j++){
+					if ((blockptr[i].num_avail > 0) || (blockptr[i].share == 1)){
+						//allocate resource
+						if (blockptr[i].request_pids[j] != 0){
+							//find pid index in pids[]
+							int x;
+							for (x = 0; x < numSlaves; x++){
+								if (pids[x] == blockptr[i].request_pids[j]){
+									blockptr[i].current_pids[x]++;//update quantity of resource this pid has
+									//printf("current_pids updated\n");
+								}
+							}
+							blockptr[i].num_avail--;//decrease num available
+							requests_granted++;//total requests granted					
+							//send request granted message to pid
+							sbuf.mtype = blockptr[i].request_pids[j];
+							if(msgsnd(msqid, &sbuf, 0, IPC_NOWAIT) < 0){
+								perror("resource granted message send error");
+								cleanup();
+							}else{
+								//printf("resource granted message sent\n");
+								blockptr[i].request_pids[j] = 0;//remove pid from request
+							}
 						}
 					}
 				}
 			}
-		}
 		
+			//deadlock detection
+			currentsec = clock[0];
+			currentns = clock[1];
+			if ((currentsec - last_checksec) >= deadlock_check){
+			//if ((((currentsec * 1000000000) + currentns) - ((last_checksec * 1000000000) + last_checkns)) >= deadlock_check){
+				last_checksec = currentsec;
+				last_checkns = currentns;
+				int deadlock = 0;//no deadlock
+				//int catch = 0;//jsut to make sure not an ifinite loop
+				printf("checking for deadlock at %d : %d\n", currentsec, currentns);
+				do {
+					int x;
+					for (i = 0; i < 20; i++){
+						//if not shareable and none available
+						if ((blockptr[i].share == 0) && (blockptr[i].num_avail == 0)){
+							int j;
+							for (j = 0; j < MAX; j++){
+								//pid in requests, none available
+								if (blockptr[i].request_pids[j] != 0){
+									deadlock = 1;
+									printf("found deadlock\n");
+									//find pid and remove resources and delete process
+									pid = blockptr[i].request_pids[j];
+									blockptr[i].request_pids[j] = 0;//remove from request_pids
+									for (x = 0; x < numSlaves; x++){
+										if (pids[x] == pid){
+											printf("found pid %d involved in deadlock. is pids[%d]\n", pid, x);
+											break;
+										}
+									}
+									
+									break;//break out of for loop for j requests
+								}
+							}
+							break;//break out of for loop for i resources
+						}
+					}
+					if (deadlock == 1){
+						//remove pid and its resources
+						for (i = 0; i < 20; i++){
+							while (blockptr[i].current_pids[x] > 0){
+								blockptr[i].current_pids[x]--;
+								blockptr[i].num_avail++;
+							}
+						}
+						kill(pid, SIGQUIT);
+						pids[x] = 1;//remove from pids
+						deadlock = 0;//hopeful
+						
+					}
+					
+					//test if still deadlock
+					for (i = 0; i < 20; i++){
+						if ((blockptr[i].share == 0) && (blockptr[i].num_avail == 0)){
+							int j;
+							for (j = 0; j < MAX; j++){
+								if (blockptr[i].request_pids[j] != 0){
+									deadlock = 1;//still deadlocked
+									break;
+								}
+							}
+							break;
+						}
+					}
+					//catch++;
+				}while (deadlock == 1);// && catch < 10);
+			
+			}
+			//put critical section token back into message queue	
+			sbuf.mtype = 1;
+			//send message
+			if(msgsnd(msqid, &sbuf, 0, IPC_NOWAIT) < 0) {
+				printf("%d, %d, %d, %d\n", msqid, sbuf.mtype);
+				perror("msgsnd critical section token");
+				cleanup();
+			}else{
+				//printf("critical section token available\n");
+			}
+		}
 	
 		
 		//check for child termination messages
@@ -365,11 +490,19 @@ int main(int argc, char **argv){
 			childns = rbuf.mtext[1];
 			printf("time up message from user received.\n");
 			//TODO write to log
-			//TODO update pids[], current num processes
+			//update pids[], current num processes
+			pid = wait(&status);//make sure child terminated
+			//find pid in pids[]
+			for(i = 0; i < numSlaves; i++){
+				if(pids[i] == pid){
+					printf("found pid that terminated.\n");
+					pids[i] = 1;
+					currentnum--;
+				}
+			}
 				
 		}
-		//TODO run deadlock detection
-		
+				
 		//get current time
 		if(clock_gettime(clockid, &now) == 0){
 			nowtime = now.tv_sec;
@@ -380,7 +513,8 @@ int main(int argc, char **argv){
 		currentnum--;
 		kill(pids[currentnum], SIGQUIT);
 	} 
-	
+	printf("%d total processes ran\n", totalProcesses);
+	printf("%d total requests granted\n", requests_granted);
 	//code for freeing shared memory
 	/* if(detachshared() == -1){
 		return 1;
