@@ -144,6 +144,7 @@ int main(int argc, char **argv){
 		//look for message type 1 critical section "token"
 		if(msgrcv(msqid, &rbuf, 0, 1, 0) < 0){
 			//printf("message not received.\n");
+			//return 1;
 		}else{
 			//printf("critical section token received.\n");
 			//update clock
@@ -174,6 +175,7 @@ int main(int argc, char **argv){
 					printf("%d, %d\n", msqid, sbuf.mtype);
 					perror("time msgsend");
 					detachshared();
+					return 1;
 				}else{
 					//printf("user terminating message sent. %d, %d\n", sbuf.mtext[0], sbuf.mtext[1]);
 				}
@@ -194,6 +196,7 @@ int main(int argc, char **argv){
 					printf("%d, %d\n", msqid, sbuf.mtype);//, sbuf.mtext[0], buf_length);
 					perror("msgsnd from user");
 					detachshared();
+					return 1;
 				}else{
 					//printf("critical section token sent from user.\n");
 				}
@@ -225,6 +228,7 @@ int main(int argc, char **argv){
 							printf("%d, %d\n", msqid, sbuf.mtype);//, sbuf.mtext[0], buf_length);
 							perror("msgsnd from user");
 							detachshared();
+							return 1;
 						}else{
 							//printf("critical section token sent from user.\n");
 						}
@@ -260,6 +264,7 @@ int main(int argc, char **argv){
 							printf("%d, %d\n", msqid, sbuf.mtype);//, sbuf.mtext[0], buf_length);
 							perror("msgsnd from user");
 							detachshared();
+							return 1;
 						}else{
 							//printf("critical section token sent from user.\n");
 						}
@@ -276,6 +281,7 @@ int main(int argc, char **argv){
 							printf("%d, %d\n", msqid, sbuf.mtype);//, sbuf.mtext[0], buf_length);
 							perror("msgsnd from user");
 							detachshared();
+							return 1;
 						}else{
 							//printf("critical section token sent from user.\n");
 						}

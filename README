@@ -1,0 +1,14 @@
+use command make oss user to compile program
+
+This program has a master process, oss, that forks user processes. Oss sets up 20 resource descripters in shared memory, each has an array for pids of processes requesting the resource, an array for how many occurances of this resource a particular process has (keeps track by index = process number -- not pid), an integer value for number of occurances (random 1 -10), int value for number available, and an int binary for if resource is shareable or not (20% are shareable).
+Oss also sets up a system clock and message queue in shared memory, the same as in previous projects.
+Oss uses the message queue to control access to the resource descripters and the clock.
+Oss forks new processes periodically if it's time and the current number is less than the max.
+Oss also checks for processes that have terminated naturally.
+Oss logs events.
+Oss also runs through the request arrays in the descripters and allocates resources if possible (sending message to process if resource has been granted). Every 4 seconds (system time), deadlock detection is run. It is run immediately after oss has allocated all requests it can. If there is still a pid in the request array, that process is deadlocked. My deadlock resolution involves removing all resources allocated to that process (updating number available field in the resource descripters), then killing that process. Then deadlock checks to see if there are any other pids in request arrays AND num avail is == 0 (implying that killing the previous process didn't free up the resource this process needed). If that's the case, the algorithm is repeated until no pids are requesting a resource that has num avail == 0. 
+User processes wait for critical section token (message type 1), then update system clock, check if time to terminate naturally (if so, release all resources, send message to oss, then die), check time to request/release a resource (80% chance request), randomly select resource to request/release, return critical section token. If requesting resource, process puts its pid in the request array of the resource descripter, then waits for message from oss that its request has been granted.
+
+Every once in awhile, there's a fork error that ruins everything. I think I fixed it, but fair warning.
+
+Version control is at https://github.com/shawnaClimer/o-climers.5

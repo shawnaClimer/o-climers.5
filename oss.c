@@ -33,13 +33,18 @@ void sighandler(int sigid){
 	printf("Caught signal %d\n", sigid);
 	//send kill message to children
 	//access pids[] to kill each child
-	int i = 0;
-	while(pidptr[i] != '\0'){
-		if(pidptr[i] != 0){
+	 int i;
+	for ( i = 0; i < MAX; i++){
+		if (pidptr[i] != 1){
 			kill(pidptr[i], SIGQUIT);
 		}
-		i++;
-	}
+	} 
+	/* while(pidptr[i] != '\0'){
+		if(pidptr[i] != 1){
+			kill(pidptr[i], SIGQUIT);
+		}
+		i++; */
+	//}
 	
 	//cleanup shared memory
 	cleanup();
@@ -47,6 +52,18 @@ void sighandler(int sigid){
 	exit(sigid);
 }
 int cleanup(){
+	int i;
+	for ( i = 0; i < MAX; i++){
+		if (pidptr[i] != 1){
+			kill(pidptr[i], SIGQUIT);
+		}
+	}
+	/* while(pidptr[i] != '\0'){
+		if(pidptr[i] != 1){
+			kill(pidptr[i], SIGQUIT);
+		}
+		i++;
+	} */
 	detachshared();
 	removeshared();
 	deletequeue();
@@ -84,8 +101,8 @@ int main(int argc, char **argv){
 	extern char *optarg;
 	extern int optind;
 	int c, err = 0;
-	int hflag=0, sflag=0, lflag=0, tflag=0;
-	static char usage[] = "usage: %s -h  \n-l filename \n-i y \n-t z\n";
+	int hflag=0, sflag=0, lflag=0, tflag=0, vflag=0;
+	static char usage[] = "usage: %s -h \n-v \n-l filename \n-i y \n-t z\n";
 	
 	char *filename, *x, *z;
 	
@@ -102,7 +119,9 @@ int main(int argc, char **argv){
 				lflag = 1;
 				filename = optarg;//log file 
 				break;
-			
+			case 'v':
+				vflag = 1;//verbose on
+				break;
 			case 't':
 				tflag = 1;
 				z = optarg;//time until master terminates
@@ -118,7 +137,7 @@ int main(int argc, char **argv){
 	}
 	//help
 	if(hflag){
-		puts("-h for help\n-l to name log file\n-s for number of slaves\n-i for number of increments per slave\n-t time for master termination\n");
+		puts("-h for help\n-l to name log file\n-s for number of slaves\n-i for number of increments per slave\n-t time for master termination\n-v verbose on\n");
 	}
 	//set default filename for log
 	if(lflag == 0){
@@ -221,12 +240,12 @@ int main(int argc, char **argv){
 	int currentnum = 0;//keep count of current processes in system
 	
 	//for forking children
-	pid_t pids[numSlaves];//pid_t *pidptr points to this
+	pid_t pids[MAX];//pid_t *pidptr points to this
 	pidptr = pids;
 	//initialize pids[]
 	//printf("initializing pids[]\n");
 	int i;
-	for(i = 0; i < numSlaves; i++){
+	for(i = 0; i < MAX; i++){
 		pids[i] = 1;
 	}
 	//pid
@@ -271,7 +290,8 @@ int main(int argc, char **argv){
 	if(msgsnd(msqid, &sbuf, 0, IPC_NOWAIT) < 0) {
 		printf("%d, %d\n", msqid, sbuf.mtype);
 		perror("msgsnd");
-		cleanup();
+		//cleanup();
+		return 1;
 	}else{
 		//printf("critical section token available\n");
 	}
@@ -300,7 +320,8 @@ int main(int argc, char **argv){
 		if(msgrcv(msqid, &rbuf, 0, 1, MSG_NOERROR | IPC_NOWAIT) < 0){
 			if(errno != ENOMSG){
 				perror("msgrcv in oss");
-				cleanup();
+				//cleanup();
+				return 1;
 			}
 			
 		}else{
@@ -317,7 +338,8 @@ int main(int argc, char **argv){
 			if(msgsnd(msqid, &sbuf, 0, IPC_NOWAIT) < 0) {
 				printf("%d, %d, %d, %d\n", msqid, sbuf.mtype);
 				perror("msgsnd critical section token");
-				cleanup();
+				//cleanup();
+				return 1;
 			}else{
 				//printf("critical section token available\n");
 			}
@@ -338,7 +360,8 @@ int main(int argc, char **argv){
 			pids[i] = fork();
 			if(pids[i] == -1){
 				perror("Failed to fork");
-				cleanup();
+				//cleanup();
+				return 1;
 			}
 			
 			//convert i to a string to send as parameter
@@ -349,7 +372,8 @@ int main(int argc, char **argv){
 			if(pids[i] == 0){
 				execl("user", "user", "10000", pidnum, NULL);
 				perror("Child failed to exec user");
-				cleanup();
+				//cleanup();
+				return 1;
 			}
 			
 			free(pidnum);
@@ -362,7 +386,8 @@ int main(int argc, char **argv){
 		if(msgrcv(msqid, &rbuf, 0, 1, MSG_NOERROR | IPC_NOWAIT) < 0){
 			if(errno != ENOMSG){
 				perror("msgrcv in oss");
-				cleanup();
+				//cleanup();
+				return 1;
 			}
 			//printf("message not received.\n");
 		}else{
@@ -377,8 +402,9 @@ int main(int argc, char **argv){
 							int x;
 							for (x = 0; x < numSlaves; x++){
 								if (pids[x] == blockptr[i].request_pids[j]){
-									blockptr[i].current_pids[x]++;//update quantity of resource this pid has
+									blockptr[i].current_pids[x]++;//update quantity of resource this process has
 									//printf("current_pids updated\n");
+									break;
 								}
 							}
 							blockptr[i].num_avail--;//decrease num available
@@ -387,11 +413,26 @@ int main(int argc, char **argv){
 							sbuf.mtype = blockptr[i].request_pids[j];
 							if(msgsnd(msqid, &sbuf, 0, IPC_NOWAIT) < 0){
 								perror("resource granted message send error");
-								cleanup();
-							}else{
-								//printf("resource granted message sent\n");
-								blockptr[i].request_pids[j] = 0;//remove pid from request
+								//cleanup();
+								return 1;
 							}
+							
+							//log request granted if verbose
+							if (vflag == 1){
+								if(loglength < 1000){//log file is under 1000 lines
+									FILE *logfile;
+									logfile = fopen(filename, "a");
+									if(logfile == NULL){
+										perror("Log file failed to open");
+										//cleanup();
+										return 1;
+									}
+									fprintf(logfile, "OSS: Granted request for resource %d for pid %d at time %d : %d\n", i, blockptr[i].request_pids[j], clock[0], clock[1]);
+									fclose(logfile);
+									loglength++;
+								}
+							}
+							blockptr[i].request_pids[j] = 0;//remove pid from request
 						}
 					}
 				}
@@ -418,6 +459,18 @@ int main(int argc, char **argv){
 								//pid in requests, none available
 								if (blockptr[i].request_pids[j] != 0){
 									deadlock = 1;
+									if(loglength < 1000){//log file is under 1000 lines
+										FILE *logfile;
+										logfile = fopen(filename, "a");
+										if(logfile == NULL){
+											perror("Log file failed to open");
+											//cleanup();
+											return 1;
+										}
+										fprintf(logfile, "OSS: Detected deadlock for pid %d wanting resource %d at time %d : %d\n", blockptr[i].request_pids[j], i, clock[0], clock[1]);
+										fclose(logfile);
+										loglength++;
+									}
 									//printf("found deadlock\n");
 									//find pid and remove resources and delete process
 									pid = blockptr[i].request_pids[j];
@@ -436,11 +489,35 @@ int main(int argc, char **argv){
 						}
 					}
 					if (deadlock == 1){
+						if(loglength < 1000){//log file is under 1000 lines
+							FILE *logfile;
+							logfile = fopen(filename, "a");
+							if(logfile == NULL){
+								perror("Log file failed to open");
+								//cleanup();
+								return 1;
+							}
+							fprintf(logfile, "OSS: Removing resources from and killing pid %d at time %d : %d\n", pid, clock[0], clock[1]);
+							fclose(logfile);
+							loglength++;
+						}
 						//remove pid and its resources
 						for (i = 0; i < 20; i++){
 							while (blockptr[i].current_pids[x] > 0){
 								blockptr[i].current_pids[x]--;
 								blockptr[i].num_avail++;
+								if(loglength < 1000){//log file is under 1000 lines
+									FILE *logfile;
+									logfile = fopen(filename, "a");
+									if(logfile == NULL){
+										perror("Log file failed to open");
+										//cleanup();
+										return 1;
+									}
+									fprintf(logfile, "\tResource %d released\n", i);
+									fclose(logfile);
+									loglength++;
+								}
 							}
 						}
 						kill(pid, SIGQUIT);
@@ -458,6 +535,18 @@ int main(int argc, char **argv){
 							for (j = 0; j < MAX; j++){
 								if (blockptr[i].request_pids[j] != 0){
 									deadlock = 1;//still deadlocked
+									if(loglength < 1000){//log file is under 1000 lines
+										FILE *logfile;
+										logfile = fopen(filename, "a");
+										if(logfile == NULL){
+											perror("Log file failed to open");
+											//cleanup();
+											return 1;
+										}
+										fprintf(logfile, "\tDeadlock still exists for pid %d\n", blockptr[i].request_pids[j]);
+										fclose(logfile);
+										loglength++;
+									}
 									break;
 								}
 							}
@@ -477,7 +566,8 @@ int main(int argc, char **argv){
 			if(msgsnd(msqid, &sbuf, 0, IPC_NOWAIT) < 0) {
 				printf("%d, %d, %d, %d\n", msqid, sbuf.mtype);
 				perror("msgsnd critical section token");
-				cleanup();
+				//cleanup();
+				return 1;
 			}else{
 				//printf("critical section token available\n");
 			}
@@ -489,7 +579,8 @@ int main(int argc, char **argv){
 		if(msgrcv(msqid, &rbuf, sizeof(int [MSGSZ]), 2, MSG_NOERROR | IPC_NOWAIT) < 0){
 			if(errno != ENOMSG){
 				perror("msgrcv in oss");
-				cleanup();
+				//cleanup();
+				return 1;
 			}
 				//printf("message time up from user not received.\n");
 		}else{
@@ -497,7 +588,6 @@ int main(int argc, char **argv){
 			childsec = rbuf.mtext[0];
 			childns = rbuf.mtext[1];
 			//printf("time up message from user received.\n");
-			//TODO write to log
 			//update pids[], current num processes
 			pid = wait(&status);//make sure child terminated
 			//find pid in pids[]
@@ -517,10 +607,15 @@ int main(int argc, char **argv){
 		}
 	}
 	//terminate any leftover children
-	while(currentnum > 0){
+	/* while(currentnum > 0){
 		currentnum--;
 		kill(pids[currentnum], SIGQUIT);
-	} 
+	}  */
+	for (i = 0; i < numSlaves; i++){
+		if (pids[i] != 1){
+			kill(pids[i], SIGQUIT);
+		}
+	}
 	printf("%d total processes started\n", totalProcesses);
 	printf("%d total processes terminated naturally\n", num_natural);
 	printf("%d total processes terminated by deadlock\n", num_deadlock);
@@ -529,9 +624,14 @@ int main(int argc, char **argv){
 	for (i = 0; i < num_check; i++){
 		temp += per_killed[i];
 	}
-	temp = (temp / num_check);
+	if (temp != 0){
+		temp = (temp / num_check);
+	}
+	
 	printf("%.2f percent average killed in deadlock\n", temp * 100);
 	printf("%d total requests granted\n", requests_granted);
+	
+	
 	//code for freeing shared memory
 	/* if(detachshared() == -1){
 		return 1;
